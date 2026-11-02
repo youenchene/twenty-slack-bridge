@@ -104,6 +104,45 @@ describe("createNote", () => {
   });
 });
 
+describe("App Home queries", () => {
+  const M = "7b996a1c-20e8-465c-93b6-964543b4e4ed";
+
+  it("finds a member by email, case-insensitively, and returns undefined when absent", async () => {
+    const { fetchMock, client } = setup((url) =>
+      reply({ data: { workspaceMembers: new URL(url).searchParams.get("filter")!.includes("nobody") ? [] : [{ id: M, name: { firstName: "Youen", lastName: "Chéné" } }] } }),
+    );
+    expect(await client.findMemberByEmail(" YChene@pulsover.com ")).toEqual({ id: M, name: "Youen Chéné" });
+    expect(new URL(fetchMock.mock.calls[0]![0]).searchParams.get("filter")).toBe('userEmail[ilike]:"YChene@pulsover.com"');
+    expect(await client.findMemberByEmail("nobody@x.io")).toBeUndefined();
+  });
+
+  it("strips quotes from interpolated values", async () => {
+    const { fetchMock, client } = setup(() => reply({ data: { workspaceMembers: [] } }));
+    await client.findMemberByEmail('a"),or(x@y.z');
+    expect(new URL(fetchMock.mock.calls[0]![0]).searchParams.get("filter")).toBe('userEmail[ilike]:"a),or(x@y.z"');
+  });
+
+  it("lists open opportunities owned by the member", async () => {
+    const { fetchMock, client } = setup(() => reply({ data: { opportunities: [{ id: ID, name: "Deal", stage: "MEETING" }] } }));
+    const [o] = await client.listOpenOpportunities(M);
+    const q = new URL(fetchMock.mock.calls[0]![0]).searchParams;
+    expect(q.get("filter")).toBe(`and(ownerId[eq]:"${M}",or(stage[is]:NULL,stage[neq]:"CUSTOMER"))`);
+    expect(q.get("orderBy")).toBe("closeDate[AscNullsLast]");
+    expect(o).toMatchObject({ kind: "opportunity", name: "Deal", stage: "MEETING" });
+  });
+
+  it("lists unfinished tasks due before a cutoff", async () => {
+    const due = "2026-11-02T22:59:59.999Z";
+    const { fetchMock, client } = setup(() => reply({ data: { tasks: [{ id: "t1", title: "Call", dueAt: "2026-10-16T13:00:00.000Z", status: "TODO" }] } }));
+    expect(await client.listDueTasks(M, due)).toEqual([
+      { id: "t1", title: "Call", dueAt: "2026-10-16T13:00:00.000Z", status: "TODO", url: `${BASE}/object/task/t1` },
+    ]);
+    expect(new URL(fetchMock.mock.calls[0]![0]).searchParams.get("filter")).toBe(
+      `and(assigneeId[eq]:"${M}",or(status[is]:NULL,status[neq]:"DONE"),dueAt[lte]:"${due}")`,
+    );
+  });
+});
+
 describe("parseRecordUrl", () => {
   const { client } = setup(() => reply({}));
   it("parses own-instance record URLs", () => {

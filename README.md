@@ -10,13 +10,13 @@ A deterministic Slack app (Bolt for TypeScript, Socket Mode) that connects a Sla
 | 2 | **Log to CRM** message shortcut | Message → modal → search/pick a record → *Create note*. Note = optional comment + quoted message + author + channel + Slack permalink. |
 | 3 | Link unfurls | Pasting `https://<twenty>/object/{person,company,opportunity}/<id>` shows type, name, company, stage. |
 | 4 | Notifications | Twenty webhook → `POST /webhooks/twenty` → post in `SLACK_NOTIFY_CHANNEL` when an Opportunity is created or its stage changes. |
-| 5 | App Home (stretch) | Not implemented yet. |
+| 5 | App Home | The bot's **Home** tab shows *My open opportunities* (owned by you, any stage except Customer) and *Follow-ups due today* (unfinished tasks assigned to you, due today or overdue). Refreshed each time you open the tab. |
 
 Destructive or ambiguous writes (update/delete) must go through the Approve/Cancel card (`src/approvals.ts`, `src/blocks/approval.ts`, handlers in `src/index.ts`). The MVP only creates notes, which apply directly, so nothing uses the card yet.
 
 ## Known limitation: writes are attributed to the bot
 
-The bot uses **one shared Twenty API key**. Every write (e.g. a note from *Log to CRM*) appears in Twenty as made by the API key / bot, **not** by the Slack user who triggered it. The Slack author is recorded in the note body instead. Per-user mapping (Slack email → Twenty workspace member) is a planned later iteration.
+The bot uses **one shared Twenty API key**. Every write (e.g. a note from *Log to CRM*) appears in Twenty as made by the API key / bot, **not** by the Slack user who triggered it. The Slack author is recorded in the note body instead. Per-user attribution of writes is a planned later iteration. The App Home tab already matches Slack users to Twenty workspace members by email, but only to *read* their data.
 
 ## Configuration
 
@@ -31,7 +31,8 @@ All config is environment-only (see `.env.example`):
 | `SLACK_SIGNING_SECRET` | Slack app → Basic Information |
 | `SLACK_NOTIFY_CHANNEL` | Channel **ID** (invite the bot to it) |
 | `PORT` | HTTP port for the Twenty webhook (default 3000) |
-| `TWENTY_WEBHOOK_SECRET` | Optional. If set, webhook signatures are verified (recommended). |
+| `TWENTY_WEBHOOK_SECRET` | Optional but recommended. If set, webhook signatures are verified; if not, the bot logs a warning at startup. See step 3. |
+| `TZ` | Timezone that defines "due today" on the Home tab, e.g. `Europe/Paris`. Defaults to UTC in Docker. |
 
 ## 1. Create the Slack app
 
@@ -42,8 +43,9 @@ Fastest: *api.slack.com/apps → Create New App → From a manifest* and paste `
 
 Manual setup, if you prefer the UI. The manifest does all of this:
 
-- **Bot scopes:** `commands`, `chat:write`, `app_mentions:read`, `links:read`, `links:write`, plus `users:read` (used to show the author's real name in notes; without it the note falls back to the Slack user ID).
-- **Event subscriptions → bot events:** `app_mention`, `link_shared`.
+- **Bot scopes:** `commands`, `chat:write`, `app_mentions:read`, `links:read`, `links:write`, plus `users:read` (author's real name in notes) and `users:read.email` (matches you to your Twenty user on the Home tab).
+- **Event subscriptions → bot events:** `app_mention`, `link_shared`, `app_home_opened`.
+- **App Home:** enable the Home tab.
 - **App Unfurl Domains:** `crm.tooling.pulsover.io`.
 - **Slash command:** `/crm` (no request URL needed in Socket Mode).
 - **Interactivity & Shortcuts:** enable; add a **message** shortcut, name *Log to CRM*, callback ID `log_to_crm`.
@@ -55,7 +57,7 @@ In Twenty: **Settings → APIs & Webhooks → API keys → Create**, copy the ke
 
 ## 3. Register the Twenty webhook
 
-In Twenty: **Settings → APIs & Webhooks → Webhooks → Create webhook**, URL `https://<bot-subdomain>/webhooks/twenty`. Twenty sends every event type. The bot ignores everything except `opportunity.created` and `opportunity.updated` where the stage changed. Copy the webhook secret into `TWENTY_WEBHOOK_SECRET`.
+In Twenty: **Settings → APIs & Webhooks → Webhooks → Create webhook**, URL `https://<bot-subdomain>/webhooks/twenty`. Twenty sends every event type. The bot ignores everything except `opportunity.created` and `opportunity.updated` where the stage changed. Twenty does not generate the secret: create one (`openssl rand -hex 32`), paste it into the webhook's **Secret** field in Twenty, and put the same value in `TWENTY_WEBHOOK_SECRET`. If the two differ, every webhook is rejected with 401.
 
 > Twenty's payload shape has changed between versions; `src/webhooks/twenty.ts` accepts `{eventName, record, updatedFields | properties.before}` and the older `{event, data}`. Check it against your instance with the manual test checklist below.
 
@@ -89,7 +91,9 @@ Run the bot as a **custom app on the same Cloudron server** with its own subdoma
 - Filters: `filter=or(name[ilike]:"%x%",…)` / `and(…)`. `depth=1` inlines `company`, `owner` and `pointOfContact`.
 - Opportunity `stage` values: `NEW`, `SCREENING`, `MEETING`, `PROPOSAL`, `CUSTOMER`.
 - Note creation: `POST /rest/notes {title, bodyV2:{markdown}}` → `data.createNote.id`, then `POST /rest/noteTargets {noteId, targetPersonId|targetCompanyId|targetOpportunityId}`.
-- Record URLs: `/object/{person|company|opportunity}/<id>`.
+- Record URLs: `/object/{person|company|opportunity|task}/<id>`.
+- Workspace members: `/rest/workspaceMembers?filter=userEmail[ilike]:"…"`. Opportunities have `ownerId`; tasks have `assigneeId`, `dueAt` and `status` (`TODO`, `IN_PROGRESS`, `DONE`).
+- Sorting: `orderBy=dueAt[AscNullsLast]`.
 
 ## Manual test checklist
 
@@ -103,4 +107,7 @@ Run the bot as a **custom app on the same Cloudron server** with its own subdoma
 - [ ] Creating an opportunity in Twenty posts a notification in `SLACK_NOTIFY_CHANNEL`.
 - [ ] Changing an opportunity's stage posts a notification. Editing only its name does not.
 - [ ] `curl -X POST /webhooks/twenty -d '{}'` with a wrong signature returns 401 when `TWENTY_WEBHOOK_SECRET` is set.
+- [ ] Opening the bot's **Home** tab shows your open opportunities and tasks due today or overdue (overdue ones are flagged).
+- [ ] A Slack user whose email is not a Twenty user sees the "couldn't find a Twenty user" message.
+- [ ] Starting the bot without `TWENTY_WEBHOOK_SECRET` logs a warning.
 - [ ] Bot with a revoked/invalid `TWENTY_API_KEY`: `/crm` replies with a friendly error, process stays up.

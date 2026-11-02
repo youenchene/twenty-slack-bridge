@@ -3,6 +3,7 @@ import { createApprovalStore } from "./approvals.js";
 import { APPROVE_ACTION_ID, buildApprovalResultBlocks, CANCEL_ACTION_ID } from "./blocks/approval.js";
 import { buildNotificationBlocks } from "./blocks/notification.js";
 import { registerCrmCommand } from "./commands/crm.js";
+import { registerAppHome } from "./home/app-home.js";
 import { loadConfig } from "./config.js";
 import { registerLogToCrm } from "./shortcuts/log-to-crm.js";
 import { createTwentyClient } from "./twenty-client.js";
@@ -49,6 +50,14 @@ const app = new App({
 registerCrmCommand(app, twenty);
 registerLogToCrm(app, twenty);
 registerLinkUnfurls(app, twenty);
+registerAppHome(app, twenty);
+
+if (!config.twentyWebhookSecret) {
+  app.logger.warn(
+    "TWENTY_WEBHOOK_SECRET is not set: /webhooks/twenty accepts unsigned requests, so anyone who knows the URL " +
+      "can post fake notifications. Set the same secret in Twenty (webhook settings) and in this env var.",
+  );
+}
 
 // Approve/Cancel card handlers for any write that requires confirmation (update/delete).
 const resolveApproval = (approve: boolean) =>

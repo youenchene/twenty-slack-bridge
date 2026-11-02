@@ -11,6 +11,19 @@ export interface CrmRecord {
   readonly url: string;
 }
 
+export interface WorkspaceMember {
+  readonly id: string;
+  readonly name: string;
+}
+
+export interface CrmTask {
+  readonly id: string;
+  readonly title: string;
+  readonly dueAt?: string;
+  readonly status?: string;
+  readonly url: string;
+}
+
 export interface TwentyClientOptions {
   readonly baseUrl: string;
   readonly apiKey: string;
@@ -94,7 +107,15 @@ export function createTwentyClient(opts: TwentyClientOptions) {
     return text ? (JSON.parse(text) as Json) : {};
   };
 
-  const recordUrl = (kind: RecordKind, id: string): string => `${base}/object/${kind}/${id}`;
+  const recordUrl = (kind: RecordKind | "task", id: string): string => `${base}/object/${kind}/${id}`;
+
+  const list = async (collection: string, params: Record<string, string>): Promise<Json[]> => {
+    const body = await request(`/rest/${collection}?${new URLSearchParams(params)}`);
+    const rows = asObj(body.data)[collection];
+    return Array.isArray(rows) ? rows.map(asObj) : [];
+  };
+
+  const quoted = (v: string): string => `"${v.replace(/["\\]/g, "")}"`;
 
   const toRecord = (kind: RecordKind, raw: Json): CrmRecord => {
     const id = String(raw.id);
@@ -132,6 +153,33 @@ export function createTwentyClient(opts: TwentyClientOptions) {
     getRecord: async (kind: RecordKind, id: string): Promise<CrmRecord> => {
       const body = await request(`/rest/${COLLECTION[kind]}/${encodeURIComponent(id)}?depth=1`);
       return toRecord(kind, asObj(asObj(body.data)[kind]));
+    },
+    /** Maps a login email to a Twenty workspace member (case-insensitive). */
+    findMemberByEmail: async (email: string): Promise<WorkspaceMember | undefined> => {
+      const [row] = await list("workspaceMembers", { filter: `userEmail[ilike]:${quoted(email.trim())}`, limit: "1" });
+      return row ? { id: String(row.id), name: fullName(row.name) ?? email } : undefined;
+    },
+    /** Opportunities owned by the member whose stage is not CUSTOMER, soonest close date first. */
+    listOpenOpportunities: async (memberId: string, limit = 10): Promise<CrmRecord[]> => {
+      const rows = await list("opportunities", {
+        filter: `and(ownerId[eq]:${quoted(memberId)},or(stage[is]:NULL,stage[neq]:"CUSTOMER"))`,
+        orderBy: "closeDate[AscNullsLast]",
+        limit: String(limit),
+        depth: "1",
+      });
+      return rows.map((r) => toRecord("opportunity", r));
+    },
+    /** Unfinished tasks assigned to the member, due on or before `dueBefore` (ISO), oldest first. */
+    listDueTasks: async (memberId: string, dueBefore: string, limit = 10): Promise<CrmTask[]> => {
+      const rows = await list("tasks", {
+        filter: `and(assigneeId[eq]:${quoted(memberId)},or(status[is]:NULL,status[neq]:"DONE"),dueAt[lte]:${quoted(dueBefore)})`,
+        orderBy: "dueAt[AscNullsLast]",
+        limit: String(limit),
+      });
+      return rows.map((r) => {
+        const id = String(r.id);
+        return { id, title: asStr(r.title) ?? "(untitled)", dueAt: asStr(r.dueAt), status: asStr(r.status), url: recordUrl("task", id) };
+      });
     },
     /** Creates a note, then links it to the target record. Returns the note id. */
     createNote: async (input: { title: string; markdown: string; target: { kind: RecordKind; id: string } }): Promise<string> => {
