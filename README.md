@@ -82,7 +82,30 @@ Health check: `GET /healthz`.
 
 ## Deployment (Cloudron)
 
-Run the bot as a **custom app on the same Cloudron server** with its own subdomain (for example `slack-bridge.tooling.pulsover.io`) using the Dockerfile in this repo, with the environment variables above. Register the Twenty webhook as `https://<bot-subdomain>/webhooks/twenty`. Slack itself needs no public URL (Socket Mode).
+The bot runs as a **custom app on the same Cloudron server** as Twenty, at `https://slack-bridge.tooling.pulsover.io`. `CloudronManifest.json` packages it: HTTP port 3000, health check `/healthz`. Slack itself needs no public URL (Socket Mode); the subdomain is only for the Twenty webhook.
+
+Requires Cloudron **9.1.5+** and the Cloudron CLI (`npm install -g cloudron`, then `cloudron login my.tooling.pulsover.io`). Cloudron builds the image on the server from the `Dockerfile`; `.dockerignore` keeps `.env` out of the upload.
+
+```bash
+# First install (env vars passed inline; values from your .env)
+cloudron install --location slack-bridge.tooling.pulsover.io --env TWENTY_BASE_URL=... TWENTY_API_KEY=... SLACK_BOT_TOKEN=... \
+  SLACK_APP_TOKEN=... SLACK_SIGNING_SECRET=... SLACK_NOTIFY_CHANNEL=... TZ=Europe/Paris PORT=3000
+
+# Deploy a new version (rebuilds on the server from your working copy;
+# bumping "version" in CloudronManifest.json is recommended so Cloudron shows it)
+cloudron update --app slack-bridge.tooling.pulsover.io
+
+# Change config (restarts the app)
+cloudron env set --app slack-bridge.tooling.pulsover.io TWENTY_WEBHOOK_SECRET=...
+cloudron env list --app slack-bridge.tooling.pulsover.io
+
+# Logs
+cloudron logs --app slack-bridge.tooling.pulsover.io -f
+```
+
+Register the Twenty webhook as `https://slack-bridge.tooling.pulsover.io/webhooks/twenty` (step 3 above).
+
+**Run only one copy of the bot per Slack app.** With Socket Mode, Slack spreads events across every connected copy, so a local `npm run dev` running alongside the Cloudron app gets about half the events. Stop the local one, or create a separate Slack app for development.
 
 ## Verified Twenty REST details (against the live instance)
 

@@ -1,0 +1,17 @@
+{
+  "id": "io.pulsover.twentyslackbridge",
+  "title": "Twenty Slack Bridge",
+  "tagline": "Slack app for the self-hosted Twenty CRM",
+  "description": "Deterministic Slack bot (Socket Mode) for Twenty CRM: /crm search, Log to CRM shortcut, link unfurls, opportunity notifications and an App Home tab. Configure it with environment variables (see README).",
+  "version": "0.1.0",
+  "manifestVersion": 2,
+  "minBoxVersion": "9.1.0",
+  "httpPort": 3000,
+  "healthCheckPath": "/healthz",
+  "memoryLimit": 268435456,
+  "addons": {},
+  "packagerName": "Pulsover",
+  "packagerUrl": "https://pulsover.com",
+  "website": "https://github.com/youenchene/twenty-slack-bridge",
+  "postInstallMessage": "Set the environment variables with `cloudron env set --app $CLOUDRON-APP-FQDN KEY=value ...` (see README), then register the Twenty webhook as $CLOUDRON-APP-ORIGIN/webhooks/twenty."
+}
